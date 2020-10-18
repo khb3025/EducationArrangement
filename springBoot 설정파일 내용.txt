@@ -1,0 +1,19 @@
+########devtools = Google Chrome debuging tool setting
+spring.devtools.restart.enabled=true
+
+########JSP\uac00 \uc544\ub2c8\ub77c thymeleaf\ub77c\ub294 \ud15c\ud50c\ub9bf
+#Thymeleaf\ub294 HTML, XML, JavaScript, CSS 및 일반 텍스트를 처리할 수 있는 웹 및 독립형 환경에서 사용할 수 있는 Java 템플릿 엔진
+#Thymeleaf\ub294 html파일을 가져와서 파싱해서 분석후 정해진 위치에 데이터를 치환해서 웹 페이지를 생성합니다.
+#JSP는 서블릿으로 변환되어 실행이 되어집니다. JSP내에서 자바 코드를 사용할 수도 있습니다.
+#Thymeleaf는 자바코드를 사용할 수 없고, jsp에서 처럼 커스텀태그와 같은 기능도 없습니다.
+
+
+spring.thymeleaf.cache=false
+
+#mysql 데이터베이스 설정 방법
+server.port=80
+
+spring.datasource.driver-class-name=com.mysql.jdbc.Driver
+spring.datasource.url=jdbc:mysql://172.30.1.33:3306/khbTestDB?characterEncodeing=UTF-8
+spring.datasource.username=khbTestDB
+spring.datasource.password=khbTestDB
