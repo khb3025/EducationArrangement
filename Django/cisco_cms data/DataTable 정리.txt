@@ -1,0 +1,113 @@
+DataTable 정리
+
+      table_mr = $("#table_mr").DataTable({
+        dom: '<"row"<"col-sm-6"f>""<"col-sm-6 tm-btn-group text-right">">t<"row"<"col-sm-12"p>>',   ======>> ( f = filtering input [검색 input ] ) ( t = table ) ( p = pagination ) [ https://datatables.net/reference/option/dom 참조 ]
+        searching: true, ========>> 검색 기능 활성화  [false 시에 filtering input 이 사라짐]
+        paginate: true, ========>> paging 처리 활성화 [paging : true 와 동일][false 시에 paging 효과가 사라짐]
+        pageLength: 15, ========>> 한 페이지에 보여줄 row의 수
+        processing: true, =========>> DataTable에 처리해야할 데이터가 많아 출력이 늦어질 때 '처리 중' 임을 표시하는 기능
+        serverSide: true, ========> 서버사이드에서 DataTable의 Filtering , Paging , sorting 을 제어하기 위한 옵션 [비활성화시 paging, filtering 관련 정보가 (Django=views)(Spring=Controller) 에 전달되지 않는다.] [참조 : https://datatables.net/reference/option/serverSide]
+        ordering: false, =======> DataTable에 표시되는 각 컬럼의 Sorting 기능 비활성화
+        ajax: {   =======> DataTable ajax 옵션
+          url: "/meetingroom/list", ================> ajax 요청 url
+          type: "POST", ===============> 전송방식 설정
+          dataType: "json", ===========> 전달 받을 데이터의 형식
+          data: { ========> 요청(request) 에 포합되는 parameter 값 셋팅
+            'csrfmiddlewaretoken': $('.hidden_csrftoken').val(),
+          },
+          dataFilter: function (data) { ================> DataTable callback function 으로 (Django : View / Spring : Controller) 단에서 전송하는 Json 형식의 데이터에 Data : { key : value } 만 존재하면 생략해도 무관하다.
+			         =================> 그러나 굳이 dataFilter를 사용하는 이유는 반환된 data를 확인하기 위함과 DataTable에 <tbody> 에 해당하는 row들을 셋팅하기 전에 컬럼의 값이나 전달받은 Json 값을 정정할수 있는 기능을 가지고 있다.
+            var json = jQuery.parseJSON(data);
+            //json['success'] = [{value1 : 'val1'}, {value2 : 'val2'}]  ===============> json['data'][0]['name'] = '둠칫둠칫'   으로 변경하면 보여지는 0번째 row의 name 값이 변경되어 적용된다.
+            console.log("return JSON DATA!!! ->",json);
+            return JSON.stringify(json); =========> dataFilter를 작성하였을 경우 return 값을 JSON 문자열 형식으로 반환해주어야 DataTable이 table 정보를 셋팅할 수 있다.
+          }
+        },
+        createdRow:function(row, data, idx){ =======> table의 body에서 tr 태그가 생성되었을때 처리되는 CallBack function
+          
+        },
+        columns: [  =======> columns 는 JSON 객체 형식의 data 정보를 기반으로 컬럼에 맞는 field 값을 출력하도록 셋팅한다.
+          {data: "@id",fnCreatedCell:function(nTd, sData, oData, iRow, iCol){  =========> fnCreatedCell 함수 [ https://datatables.net/docs/DataTables/1.9.0/DataTable.models.oColumn.html#fnCreatedCell 참조 ]
+
+              $(nTd).html($.dtcheckboxbs4());   =======> nTd 파라미터 : Td태그를 생성한다 [Td의 information 작성]
+              console.log('sData -->', sData); ======>해당 컬럼에서 출력중인  field Value를 의미
+              console.log('oData -->', oData); ======> 해당 컬럼에서 출력중인 field를 포함하는 row data를 의미
+              console.log('iRow -->', iRow); ======> 출력중인 row의 인덱스
+              console.log('iCol -->', iCol); ======> 출력중인 컬럼의 index
+          }},
+          {data: "name"},
+          {data: "uri"},
+          {data: "callId"},
+          {data: "owner_yn"},
+          {data: "group_name"},
+          {data: "group_seq"},
+          {
+            
+            'defaultContent': '', //'<h1>default</h1>',   
+            fnCreatedCell: function (nTd, sData, oData, iRow, iCol) {   ======> 'defaultContent' 나 data 키값이 없는경우 에러를 발생하나(경고창을 띄우나) 함수는 실행된다.
+              if(oData['owner_yn'] == 'Y'){
+                var $button = $("<button>").addClass("btn btn-sm p-t-0 p-b-0")
+                  .on("click", function () {
+                    _page.mr_detail(oData['@id'], oData['group_seq'], oData['server_seq'])
+                  })
+                  .text("VIEW");
+                $(nTd).html($button);
+              }
+              else{
+                $(nTd).html('');
+              }
+            }
+            
+          },
+          //{success : 'value1'}, ========> columns 는 data , defaultContent 만을 읽어들임 [주석을 풀면 에러발생 > success 에 해당하는 Json 객체는 안읽어 들인다.]
+          //{success : 'value2'}
+          
+
+        ],
+        columnDefs: [   ==========> [ https://datatables.net/reference/option/columns 관련 옵션 참고]
+          {targets: 0, orderable: false, searchable: false, checkboxes: true, className: "text-center text-middle"},  =======> orderable -> 각 컬럼의 정렬기능 ON/OFF , className --> 컬럼의 각각의 field 의 Class 속성 셋팅
+											          =======> searchable -> filterinput 검색시 해당 컬럼의 field 를 검색 불가, checkboxes 체크 박스 기능 활성화 
+											          =======> [orderable활성화 시 serverSide 옵션이 true인 경우 ordering 아이콘이 활성화 되어도 정렬되지 않는다. -> 서버에서 받은 JSON데이터의 순서대로 하드하게 뿌려주기 때문]
+											          =======> [searchable비 활성화 시 serverSide 옵션이 true인경우 검색값을 서버단으로 전송하여 리스트를 뿌려주기 때문에 비활성화된 컬럼이라도 검색 리스트가 출력된다.]
+          {targets: [4, 6], visible: false},
+          {targets: [1, 2, 3, 4, 5, 6, 7], className: "text-center text-middle"}
+        ],
+        initComplete:function(){   =======> 데이터가 완전히 로드 되었을때 실행하는 콜백함수.
+
+          let btn_del = $("<button>").attr("id","btn_del")
+                                    .addClass("btn btn-outline b-danger text-danger text-up")
+                                    .text(gettext("버튼.공통.삭제"))
+                                    .on("click",function(){
+                                      _page.mr_delete();
+                                    });
+
+          let btn_match = $("<button>").attr("id","btn_match")
+                                    .addClass("btn btn-outline b-success text-success m-r-2 text-up")
+                                    .text(gettext("버튼.미팅룸.동기화"))
+                                    .on("click",function(){
+                                      _page.mr_match();
+                                    });
+
+          let btn_add = $("<button>").attr("id","btn_add")
+                                    .addClass("btn btn-outline b-primary text-primary m-r-2 text-up")
+                                    .text(gettext("버튼.공통.추가"))
+                                    .on("click",function(){
+                                      _page.initSelectBoxGroup()
+                                      _page.dataClear();
+                                      $("#inputDiv").showInput();
+                                      $("#btn_start").addClass("deactive");
+                                    });
+
+          let btn_prompt = $("<button>").attr("id","btn_prompt")
+                                        .addClass("btn btn-outline b-warn text-warn m-r-2 text-up")
+                                        .text(gettext("버튼.미팅룸.즉시시작"))
+                                        .on("click",function(){
+                                          _page.initSelectBoxGroup()
+                                          $("#promptDiv").showDiv();
+                                        });
+
+          $(".tm-btn-group").append(btn_match).append(btn_prompt).append(btn_add).append(btn_del);
+
+        }
+      }).columns.adjust(); =======> 테이블의 레이아웃 크기를 재설정하는 함수.
+

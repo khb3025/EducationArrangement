@@ -1,0 +1,1094 @@
+#-*- coding: utf-8 -*-
+
+import json
+import asyncio
+from django.shortcuts import render
+from django.db import connections
+from django.http import HttpResponse, JsonResponse
+from backend.djangoapps.common.util import views as TMUtility
+
+#공통 API
+from backend.djangoapps.common.com.views import CiscoApi
+from backend.djangoapps.common.core.views import coreJson
+
+from backend.models import CmsTemplate, CmsCospace
+from django.db.models import Count, Q
+import asyncio,datetime
+import traceback
+import logging
+
+
+# 이전 호출정보 확인용 (추가)
+#import inspect
+
+logger = logging.getLogger('sys')
+
+# Author  : syh
+# Desc    : MeetingRoom(cospace) 관리 페이지 로드
+# History
+# 2019.06.17 최초작성
+def meetingroom(request):
+    context = dict()
+    return render(request, 'meeting/room/meetingRoom.html', context)
+
+# Author  : syh
+# Desc    : MeetingRoom(cospace) 관리 페이지 초기화
+# History
+# 2019.06.17 최초작성
+def meetingroom_init(request):  =====> meetingRoom.html 에 deactive 된 태그의 초기화 값을 반환해주는 메소드 [meetingRoom.js 파일의 initSelectBoxTemplate함수를 참고]
+
+    context = dict()
+
+    try :
+        # 템플릿 리스트
+        group_seq = request.POST.get("group_seq")
+        query = '''
+            SELECT
+                seq,title
+            FROM
+                cms_template
+            WHERE
+                delete_yn='N'
+                AND group_seq = '{group_seq}'
+        '''.format(group_seq=group_seq)
+        query_list = TMUtility.get_query_to_list(query)
+        print("initSelectBoxTemplate query_list ---> " , query_list)
+        context['result'] = "success"
+        context['data'] = query_list
+
+    except BaseException as e:
+
+        trace_back = traceback.format_exc()
+        message = str(e)+ " " + str(trace_back)
+        logger.error("@@@ meetingroom_init @@@")
+        logger.error(message)
+
+        context['result'] = "server_err"
+        context['tm_error'] = str(type(e).__name__)
+        context['tm_error_detail'] = message
+
+    finally:
+        return JsonResponse(context)
+	/*
+		반환 형태 {data : [{'seq': 55, 'title': 'Kotech_Template'}, {'seq': 97, 'title': 'testtemplate'}, {'seq': 98, 'title': 'layout_template'}, {'seq': 100, 'title': '12341234'}] }
+	*/
+
+
+
+def meetingroom_list(request):  ===================================> dataTable과 관련하여 서버사이드 로직임으로 미팅룸 데이터 변천 과정 참조.txt 파일을 참조 한다.
+    context = dict()
+
+    #all_stack_frames = inspect.stack()
+    #caller_stack_frame = all_stack_frames[1]
+    #caller_name = caller_stack_frame[3]
+    #print("meetingroom_list caller method name is", caller_name)
+
+
+    try :
+        user_role = request.session['user_role']
+        user_id = request.session['user_id']
+        length = request.POST.get('length')
+        draw = request.POST.get('draw')
+        start = request.POST.get('start')
+        searchText = request.POST.get('search[value]')
+
+        cospace_list = list()           # context 리턴 Cospace List
+        error_list = list()             # context 리턴 Error List
+        total_list = list()             # MAX 값 구하는 용도
+
+        print("draw --->" , draw)
+        print("start --->" , start)
+        print("length --->", length)
+        query_param = dict()
+        query_param['limit'] = length
+        query_param['offset'] = start
+
+
+        if searchText != '' and searchText is not None :
+            query_param['filter'] = searchText
+
+        api_list = coreJson()['api']
+        ca = CiscoApi()
+
+        total_list = list()
+
+        for group_list in api_list:
+            temp_dict = dict()
+            ca.setGroupSeqData(group_list)
+            
+            for group_data in group_list['api_list']:
+                ca.setServerSeqData(group_data['seq'])
+                t_cospace_list = ca.comCallAPI('cospaces','GET',query_param=query_param)
+                
+                
+
+                # t_cospace_list 정보를 확인
+                # print("API RETURN[ca.camCallAPI -> t_cospace_list] ===>>>>", t_cospace_list)
+
+                if t_cospace_list['status'] == 200:
+                    if t_cospace_list['total'] != 0:
+                        total_list.append(t_cospace_list['total'])
+
+                        for t_cospace_dict in t_cospace_list['body']['coSpaces']['coSpace']:
+
+                            t_dict = dict()
+                            t_dict = t_cospace_dict
+                            #print("coSpace 개체 개별 정보 --> ",t_cospace_dict)
+
+                            t_dict['server_name'] = t_cospace_list['server_name']
+                            t_dict['server_seq'] = t_cospace_list['server_seq']
+                            t_dict['group_seq'] = t_cospace_list['group_seq']
+                            t_dict['group_name'] = t_cospace_list['group_name']
+                            
+                            if 'name' not in t_cospace_dict:
+                                t_dict['name'] = ''
+
+                            if 'uri' not in t_cospace_dict:
+                                t_dict['uri'] = ''
+
+                            if 'secondaryUri' not in t_cospace_dict:
+                                t_dict['secondaryUri'] = ''
+
+                            if 'callId' not in t_cospace_dict:
+                                t_dict['callId'] = ''
+                            #print('t_dict ==>', t_dict)
+
+
+                            q_dict = TMUtility.query_args_escape(cospace_id=t_cospace_dict['@id'])
+
+                            #print("q_dict 정보 ----->>>>>>>>>", q_dict)
+                            query = '''
+                                SELECT
+                                    a.cospace_id,
+                                    a.delete_yn,
+                                    a.regist_id,
+                                    b.user_role
+                                FROM 
+                                    cms_cospace a 
+                                LEFT JOIN 
+                                    cms_manager b
+                                ON b.regist_id = a.regist_id
+                                WHERE a.cospace_id = '{cospace_id}'
+                                  AND a.delete_yn = 'N'
+                            '''.format(**q_dict)
+                            query_list = TMUtility.get_query_to_list(query)
+                            #print("query_list 정보 ---> " ,query_list)
+
+                            if len(query_list) == 0:
+                                t_dict['tm_create'] = 'N'
+                                t_dict['owner_yn'] = 'N'
+                            else:
+                                t_dict['tm_create'] = 'Y'
+                                if user_role == 'A' or user_role == 'S':
+                                    t_dict['owner_yn'] = 'Y'
+                                else:
+                                    if user_id == query_list[0]['regist_id']:
+                                        t_dict['owner_yn'] = 'Y'
+                                    else:
+                                        t_dict['owner_yn'] = 'N'
+                                        
+                            #print("t_dict 정보 --> ", t_dict)
+                            cospace_list.append(t_dict)
+                            #print("cospace_list JSON 정보 ===> ", cospace_list)
+
+                        break
+
+                    else :
+                        total_list.append(0)
+                else:
+                    total_list.append(0)
+                    error_dict= dict()
+                    error_dict['group_seq'] = group_list['group_seq']
+                    error_dict['server_seq'] = group_data['seq']
+                    error_dict['error'] = t_cospace_list['error']
+                    error_list.append(error_dict)
+
+        
+        total = max(total_list)
+        context['result'] = 'success'
+        context['error_list'] = error_list
+        context['data'] = cospace_list
+        context['draw'] = draw
+        context['recordsTotal'] = total
+        context['recordsFiltered'] = total
+        
+    except BaseException as e:
+        context['result'] = "server_err"
+        context['recordsTotal'] = 0
+        context['recordsFiltered'] = 0
+        context['data'] = list()
+
+        trace_back = traceback.format_exc()
+        message = str(e)+ " " + str(trace_back)
+        logger.error("@@@ meetingroom_list @@@")
+        logger.error(message)
+
+        context['result'] = "server_err"
+        context['tm_error'] = str(type(e).__name__)
+        context['tm_error_detail'] = message
+
+    finally:
+        #ca.comCallAPI 가 반환한 totalCountList 정보 (List의 길이가 comCallAPI가 호출된 횟수이다.)
+        print("최종 context JSON value ==>", context)
+        #print("api return totalList info==>", total_list)
+        return JsonResponse(context)
+
+# Author  : syh
+# Desc    : MeetingRoom(cospace) 상세 보기
+# History
+# 2019.06.17 최초작성
+def meetingroom_detail(request):
+    context = dict()
+    try:
+        retDict = dict()
+        cospace_id = request.POST.get('id')
+
+        q_dict = TMUtility.query_args_escape(cospace_id=cospace_id)  ===> List 목록 검색 시에도 사용된 Utility Class의 함수로 SQL문의 조건의 인자를 생성하기 위한 함수이다. 함수에서 받아들인 인자 값을 사전(dictionary) 형태로 변환해준다.
+        query = '''
+            SELECT
+            template_seq, group_seq, server_seq
+            FROM cms_cospace
+            WHERE cospace_id = '{cospace_id}'
+            AND delete_yn = 'N'
+        '''.format(**q_dict)
+        query_list = TMUtility.get_query_to_list(query) =====> get_query_to_list(query) 함수는 완성된 SQL문을 인자값으로 받아 DB실행의 결과를 List형태로 반환하는 함수이다.
+        
+        
+        if len(query_list) > 0 :   ====> kotech 서버에 저장된 값이 존재한다면, api에도 cospace의 값이 존재하는지 확인해보아야 한다.
+            api_list = coreJson()['api']    
+            ca = CiscoApi()
+
+            ca.setGroupSeq(query_list[0]['group_seq'])   	
+            ca.setServerSeqData(query_list[0]['server_seq'])    =======> ciscoAPI 를 사용하기 위해서는 groupSeq와 serverSeq 를 셋팅해주어야한다.
+
+            t_cospace = ca.comCallAPI('cospaces/{id}'.format(id=cospace_id),'GET') ======>list 때와는 다르게 상세조회는 query_param 값이 존재하지 않는다. [list 때 query_param은 {limit : 값1 , offset : 값2 , filter : 서치값 } 으로 구성되어있었다.]
+
+            if t_cospace['status'] == 200:
+                retDict = t_cospace['body']['coSpace']
+                retDict['template'] = query_list[0]['template_seq']
+                retDict['server_seq'] = query_list[0]['server_seq']
+                retDict['group_seq'] = query_list[0]['group_seq']
+
+                context['result'] = "success"
+                context['data'] = retDict
+
+            else:
+                context['result'] = "cisco_error"
+                context['cisco_error'] = t_cospace['error']
+
+        else :
+            context['result'] = "server_warning"
+            context['tm_warning'] = "No Result"
+
+    except BaseException as e:
+
+        trace_back = traceback.format_exc()
+        message = str(e)+ " " + str(trace_back)
+        logger.error("@@@ meetingroom_detail @@@")
+        logger.error(message)
+
+        context['result'] = "server_err"
+        context['tm_error'] = str(type(e).__name__)
+        context['tm_error_detail'] = message
+
+    finally:
+        return JsonResponse(context)
+
+# Author  : syh
+# Desc    : MeetingRoom(cospace) 생성
+# History
+# 2019.06.17 최초작성
+def meetingroom_create(request):
+
+    context = dict()
+    param_dict = dict()
+    
+    try:
+        if request.is_ajax():
+            user_id = request.session['user_id']
+            queryDict = request.POST
+            
+            for key,value in enumerate(queryDict):
+                param_dict[value] = request.POST.get(value)
+
+            template = param_dict['template']
+
+            if template != '':
+                template_data = CmsTemplate.objects.get(seq=template)
+                param_dict['callLegProfile'] = template_data.calllegprofile
+                param_dict['callProfile'] = template_data.callprofile
+
+            del param_dict['csrfmiddlewaretoken']
+            del param_dict['@id']
+            del param_dict['template']
+
+            api_list = coreJson()['api']
+            ca = CiscoApi()
+            ca.setGroupSeq(int(param_dict['group_seq']))
+            ca.setServerSeqData(int(param_dict['server_seq']))
+            t_cospace = ca.comCallAPI('cospaces','POST',jsonParam=param_dict)
+
+            if 200==t_cospace['status']:
+                cospace_guid = t_cospace['headers']['Location'].split('/')[-1]
+                CmsCospace.objects.create(cospace_id = cospace_guid,
+                                          name = param_dict['name'],
+                                          uri = param_dict['uri'],
+                                          call_id = param_dict['callId'],
+                                          passcode = param_dict['passcode'],
+                                          template_seq = template,
+                                          group_seq = int(param_dict['group_seq']),
+                                          server_seq = int(param_dict['server_seq']),
+                                          regist_date=datetime.datetime.now(),
+                                          regist_id=user_id)
+                context['result'] = "success"
+                TMUtility.tm_event_log(request,p_uri="/meetingroom/create", p_data=json.dumps(param_dict,ensure_ascii=False), success_yn="Y", p_type="ajax", p_comment="회의실 생성(게스트)")
+                
+            else:
+                context['result'] = "cisco_error"
+                context['cisco_error'] = t_cospace['error']
+                TMUtility.tm_event_log(request,p_uri="/meetingroom/create", p_data=json.dumps(param_dict,ensure_ascii=False), success_yn="N", p_type="ajax", p_comment="회의실 생성(게스트)", p_error=context['cisco_error'])
+
+    except BaseException as e:
+
+        trace_back = traceback.format_exc()
+        message = str(e)+ " " + str(trace_back)
+        logger.error("@@@ meetingroom_detail @@@")
+        logger.error(message)
+
+        context['result'] = "server_err"
+        context['tm_error'] = str(type(e).__name__)
+        context['tm_error_detail'] = message
+        TMUtility.tm_event_log(request,p_uri="/meetingroom/create", p_data=json.dumps(param_dict,ensure_ascii=False), success_yn="N", p_type="ajax", p_comment="회의실 생성(게스트)", p_error=context['tm_error'])
+
+    finally:
+        return JsonResponse(context)
+
+# Author  : syh
+# Desc    : MeetingRoom(cospace) 수정
+# History
+# 2019.06.17 최초작성
+def meetingroom_update(request):
+    context = dict()
+    param_dict = dict()
+
+    try:
+        if request.is_ajax():
+            user_id = request.session['user_id']
+            queryDict = request.POST
+
+            for key,value in enumerate(queryDict):
+                param_dict[value] = request.POST.get(value)
+
+            group_seq = int(param_dict['group_seq'])
+            server_seq = int(param_dict['server_seq'])
+            template = param_dict['template']
+            cospace_id = param_dict['@id']
+
+            if template != '':
+                template_data = CmsTemplate.objects.get(seq=template)
+                param_dict['callLegProfile'] = template_data.calllegprofile
+                param_dict['callProfile'] = template_data.callprofile
+            else:
+                param_dict['callLegProfile'] = ''
+                param_dict['callProfile'] = ''
+
+            del param_dict['csrfmiddlewaretoken']
+            del param_dict['@id']
+            del param_dict['template']
+
+            api_list = coreJson()['api']
+            ca = CiscoApi()
+            ca.setGroupSeq(group_seq)
+            ca.setServerSeqData(server_seq)
+            t_cospace = ca.comCallAPI('cospaces/{cospace_id}'.format(cospace_id=cospace_id),'PUT',jsonParam=param_dict)
+            
+            if 200==t_cospace['status']:
+                CmsCospace.objects.filter(cospace_id = cospace_id
+                                 ).update(name=param_dict['name'],
+                                          uri=param_dict['uri'],
+                                          call_id=param_dict['callId'],
+                                          passcode=param_dict['passcode'],
+                                          template_seq=template,
+                                          group_seq=group_seq,
+                                          server_seq=server_seq,
+                                          modify_id = user_id)
+
+                context['result'] = "success"
+                TMUtility.tm_event_log(request,p_uri="/meetingroom/update", p_data=json.dumps(param_dict,ensure_ascii=False), success_yn="Y", p_type="ajax", p_comment="회의실 수정")
+            else:
+                context['result'] = "cisco_error"
+                context['cisco_error'] = t_cospace['error']
+                TMUtility.tm_event_log(request,p_uri="/meetingroom/update", p_data=json.dumps(param_dict,ensure_ascii=False), success_yn="N", p_type="ajax", p_comment="회의실 수정", p_error=context['cisco_error'])
+
+    except BaseException as e:
+
+        trace_back = traceback.format_exc()
+        message = str(e)+ " " + str(trace_back)
+        logger.error("@@@ meetingroom_update @@@")
+        logger.error(message)
+
+        context['result'] = "server_err"
+        context['tm_error'] = str(type(e).__name__)
+        context['tm_error_detail'] = message
+        TMUtility.tm_event_log(request,p_uri="/meetingroom/update",p_data=json.dumps(param_dict,ensure_ascii=False),success_yn="N",p_type="ajax", p_comment="회의실 수정", p_error=context['tm_error'])
+
+    finally:
+        return JsonResponse(context)
+
+# Author  : syh
+# Desc    : MeetingRoom(cospace) 삭제
+# History
+# 2019.06.17 최초작성
+def meetingroom_delete(request):
+    context = dict()
+    try:
+        user_id = request.session['user_id']
+        param_dict = request.POST.get('data')
+        param_dict = json.loads(param_dict) ==> 문자열 형식의 JSON 데이터를 객체화 시킨다.
+	/*
+	{
+	 data  :	[
+	 	{'@id': '2a3d4216-b281-4caa-8971-cb3aa7c13bac', 'name': '미튕룸 쉠플1', 'autoGenerated': 'false', 'uri': '1111111', 'callId': '1111111', 'server_name': 'api_server_1', 'server_seq': '0', 'group_seq': '0', 'group_name': 'cluster1', 'secondaryUri': '', 'tm_create': 'Y', 'owner_yn': 'Y'},
+	 	{'@id': 'fca757af-b800-43b0-8c36-e1482ae17b56', 'name': '미팅룸 쉡플2', 'autoGenerated': 'false', 'uri': '2222222', 'callId': '2222222', 'server_name': 'api_server_1', 'server_seq': '0', 'group_seq': '0', 'group_name': 'cluster1', 'secondaryUri': '', 'tm_create': 'Y', 'owner_yn': 'Y'}
+		]
+	}
+	*/
+        del_list = param_dict['data'] ==> JSON 배열 DataTable의 삭제할 ROW 데이터
+	/*
+		[
+	 	{'@id': '2a3d4216-b281-4caa-8971-cb3aa7c13bac', 'name': '미튕룸 쉠플1', 'autoGenerated': 'false', 'uri': '1111111', 'callId': '1111111', 'server_name': 'api_server_1', 'server_seq': '0', 'group_seq': '0', 'group_name': 'cluster1', 'secondaryUri': '', 'tm_create': 'Y', 'owner_yn': 'Y'},
+	 	{'@id': 'fca757af-b800-43b0-8c36-e1482ae17b56', 'name': '미팅룸 쉡플2', 'autoGenerated': 'false', 'uri': '2222222', 'callId': '2222222', 'server_name': 'api_server_1', 'server_seq': '0', 'group_seq': '0', 'group_name': 'cluster1', 'secondaryUri': '', 'tm_create': 'Y', 'owner_yn': 'Y'}
+		]
+
+	*/
+		
+        api_list = coreJson()['api'] 
+	/*        api_list  정보
+		[
+          		      {
+               		     "api_list": [
+                 			       {
+                            			"ipAddress": "14.63.53.22",
+                            			"max_callLeg_total": "500",
+                            			"password": "Etechsystem",
+                            			"port": "449",
+                            			"seq": "0",
+                            			"serverName": "api_server_1",
+                            			"useHttps": "True",
+                            			"userName": "admin"
+                        			}
+                       		          ,{
+                            			"ipAddress": "14.63.53.22",
+                            			"max_callLeg_total": "500",
+                           			"password": "Etechsystem",
+                            			"port": "449",
+                            			"seq": "1",
+                            			"serverName": "api_server_2",
+                            			"useHttps": "True",
+                            			"userName": "admin"
+                        			}
+                   			  ],
+                    		"group_name": "cluster1",
+                    		"group_seq": "0"
+                	     }
+            	]
+
+	*/
+
+        fail_list = list()
+        ca = CiscoApi()
+
+        for data in del_list:
+            server_seq = int(data['server_seq'])
+            group_seq = int(data['group_seq'])
+            cospace_id = data['@id']   ====> 삭제할 아이디
+            cospace_id = cospace_id   ====> 굳이 필요 없는 코드
+
+            ca.setGroupSeqData(api_list[group_seq]) ====> CoreJson()으로 읽어들인 JSON 객체로 부터 CiscoApi 객체에 group_seq 셋팅
+            ca.setServerSeqData(api_list[group_seq]['api_list'][server_seq]['seq']) ====> CoreJson()으로 읽어들인 JSON 객체로 부터 CiscoApi 객체에 server_seq셋팅
+	/*
+		ajax 요청으로 부터 전달받은 param 값 내부에 삭제할 각각의 row 데이터를 분석하여 server_seq와 group_seq를 얻어낼수 있다.
+		이를 CiscoApi의 인자로 그룹시쿼스와 서버시퀀스를 셋팅하면 되지만, 만약 ciscoApi 의 서버 시퀀스와 그룹 시퀀스가 변경되었다고 가정한다면, 변경된 Api 정보와
+		삭제할 row 데이터의 server_seq ,group_seq 를 coreJson 으로 전달받은 Json 데이터의 배열 항목으로 존재하는지 확인하는 과정이 필요할 것 이다.
+	*/
+	
+            t_cospace = ca.comCallAPI('cospaces/{id}'.format(id=cospace_id),'DELETE') 
+	/* comCallAPI 내부동작
+
+	DELETE request URL >>>>>>>  https://14.63.53.22:449/api/v1/cospaces/b111b9b1-5923-4700-a0f4-b58ccd246093
+	DELETE req_headers >>>>>>>  {'Authorization': 'Basic YWRtaW46RXRlY2hzeXN0ZW0='}
+	DELETE jsonParam >>>>>>>  None
+	DELETE timeout >>>>>>>  1
+
+	comCallAPI ---> ciscoAPI 객체를 내 requests..delete() 함수의 인자로 위의 정보들이 셋팅됨. https://(ciscoAPI_IP)/api/v1/cospace/(cospace_Id) 를 requests.delete로 보내면 관련 회의실이 삭제된다.
+	*/
+
+
+            if 200==t_cospace['status'] :
+                result = CmsCospace.objects.filter(cospace_id = cospace_id,delete_yn = 'N').update(modify_id = user_id,delete_yn = 'Y') ======> cospace_id 에 해당하는 cospace(row)정보를 검색하여 modify_id 컬럼을 현재 접속 유저 아이디로 delete_yn 컬럼을 Y로 하여 업데이트 한다.,
+                TMUtility.tm_event_log(request,p_uri="/meetingroom/delete",p_data=json.dumps(data,ensure_ascii=False),success_yn="Y",p_type="ajax", p_comment="회의실 삭제")
+            else : =======>>>> API 의 동작에서 ROW 삭제 행위가 실패 했을 경우 동작
+                temp_dict = dict()
+                temp_dict['cisco_error'] = data['name']+"("+t_cospace['error']+")"     ====> 삭제에 실패한 datatable row의 name 값과 cisco_API에서 반환한 에러문장 조합
+                TMUtility.tm_event_log(request,p_uri="/meetingroom/delete",p_data=json.dumps(data,ensure_ascii=False),success_yn="N",p_type="ajax", p_comment="회의실 삭제", p_error=t_cospace['error']) ======> 삭제 행위에 대한 실패이벤트 로그를 저장
+                fail_list.append(temp_dict)  =====> 실패 리스트에 append
+
+        if len(fail_list) == 0:
+            context['result'] = "success"
+        else :
+            context['result'] = "cisco_list_error"
+            context['cisco_list_error'] = fail_list
+            
+
+    except BaseException as e:
+
+        trace_back = traceback.format_exc()
+        message = str(e)+ " " + str(trace_back)
+        logger.error("@@@ meetingroom_delete @@@")
+        logger.error(message)
+
+        context['result'] = "server_err"
+        context['tm_error'] = str(type(e).__name__)
+        context['tm_error_detail'] = message
+        TMUtility.tm_event_log(request,p_uri="/meetingroom/delete", p_data=json.dumps(param_dict,ensure_ascii=False), success_yn="N", p_type="ajax", p_comment="회의실 삭제", p_error=context['tm_error'])
+    finally:
+        return JsonResponse(context)
+
+def meetingroom_start(request):
+    context = dict()
+    result_list =list()
+    param_dict = dict()
+
+    try:
+        group_list = coreJson()['api']
+        user_id = request.session['user_id']
+        queryDict = request.POST
+
+        for key,value in enumerate(queryDict):
+            param_dict[value] = request.POST.get(value)
+
+        group_seq = int(param_dict['group_seq'])
+        server_seq = int(param_dict['server_seq'])
+        api_list = coreJson()['api']
+        ca = CiscoApi()
+        ca.setGroupSeq(group_seq)
+        ca.setServerSeqData(server_seq)
+
+        jsonParam = dict()
+        jsonParam['coSpace'] = param_dict['@id']
+        t_calls = ca.comCallAPI('calls', 'POST', jsonParam=jsonParam)
+
+        if 200 == t_calls['status']:
+            context['result'] = "success"
+            context['call_id'] = t_calls['headers']['Location'].split('/')[-1]
+            context['cospace_id'] = param_dict['@id']
+            context['group_seq'] = param_dict['group_seq']
+            context['server_seq'] = server_seq
+
+            TMUtility.tm_event_log(request,p_uri="/meetingroom/start", p_data=json.dumps(param_dict,ensure_ascii=False), success_yn="Y", p_type="ajax", p_comment="회의 진행")
+
+        else:
+            context['result'] = "cisco_error"
+            context['cisco_error'] = t_calls['error']
+
+            TMUtility.tm_event_log(request,p_uri="/meetingroom/start", p_data=json.dumps(param_dict,ensure_ascii=False), success_yn="N", p_type="ajax", p_comment="회의 진행", p_error=t_calls['error'])
+
+    except BaseException as e:
+
+        trace_back = traceback.format_exc()
+        message = str(e)+ " " + str(trace_back)
+        logger.error("@@@ meetingroom_start @@@")
+        logger.error(message)
+
+        context['result'] = "server_err"
+        context['tm_error'] = str(type(e).__name__)
+        context['tm_error_detail'] = message
+        TMUtility.tm_event_log(request,p_uri="/meetingroom/start", p_data=json.dumps(param_dict,ensure_ascii=False), success_yn="N", p_type="ajax", p_comment="회의 진행", p_error=context['tm_error'])
+
+    finally:
+        return JsonResponse(context)
+
+def meetingroom_prompt(request):
+    context = dict()
+    result_list =list()
+    param_dict = dict()
+
+    try:
+        user_id = request.session['user_id']
+        queryDict = request.POST
+        group_list = coreJson()['api']
+
+        for key,value in enumerate(queryDict):
+            param_dict[value] = request.POST.get(value)
+
+        group_seq = int(param_dict['group_seq'])
+        server_seq = int(param_dict['server_seq'])
+        template = param_dict['template']
+        invite_list = json.loads(param_dict['data'])
+
+        if template != '':
+            template_data = CmsTemplate.objects.get(seq=template)
+            param_dict['callLegProfile'] = template_data.calllegprofile
+            param_dict['callProfile'] = template_data.callprofile
+
+        del param_dict['data']
+        del param_dict['group_seq']
+        del param_dict['server_seq']
+        del param_dict['template']
+
+        api_list = coreJson()['api']
+        ca = CiscoApi()
+        ca.setGroupSeq(group_seq)
+        ca.setServerSeqData(server_seq)
+
+        t_cospace = ca.comCallAPI('cospaces','POST',jsonParam=param_dict)
+        temp_dict = dict()
+
+        if 200==t_cospace['status']: # 미팅룸 생성 성공
+            cospace_guid = t_cospace['headers']['Location'].split('/')[-1]
+            CmsCospace.objects.create(cospace_id=cospace_guid,
+                                        name=param_dict['name'],
+                                        uri=param_dict['uri'],
+                                        call_id=param_dict['callId'],
+                                        passcode=param_dict['passcode'],
+                                        template_seq=template,
+                                        group_seq=group_seq,
+                                        server_seq=server_seq,
+                                        regist_date=datetime.datetime.now(),
+                                        regist_id=user_id)
+
+            TMUtility.tm_event_log(request,p_uri="/meetingroom/prompt",p_data=json.dumps(param_dict,ensure_ascii=False),success_yn="Y",p_type="ajax", p_comment="즉시 시작 - 회의실 생성")
+
+            param_dict_call = dict()
+            param_dict_call['coSpace'] = cospace_guid
+            
+            temp_dict = dict()
+            temp_dict['cospace_id'] = cospace_guid
+            context['cospace_id'] = cospace_guid
+
+            t_call = ca.comCallAPI('calls','POST',jsonParam=param_dict_call)
+
+            if 200 == t_call['status']:
+                t_call_id = t_call['headers']['Location'].split('/')[-1]
+                temp_dict['call_id'] = t_call_id
+
+                loop = asyncio.new_event_loop()
+                loop_ret = loop.run_until_complete(prompt_invite_step1(loop, ca, temp_dict['call_id'], invite_list))
+                loop.close()
+
+                context['result'] = "success"
+                context['group_seq'] = group_seq
+                context['server_seq'] = server_seq
+                context['call_id'] = t_call_id
+                TMUtility.tm_event_log(request, p_uri="/meetingroom/prompt", p_data=json.dumps(param_dict,ensure_ascii=False), success_yn="Y", p_type="ajax", p_comment="즉시 시작 - 회의 시작")
+
+            else:
+                context['result'] = "cisco_error"
+                context['cisco_error'] = t_call['error']
+
+                TMUtility.tm_event_log(request,p_uri="/meetingroom/prompt",p_data=json.dumps(param_dict,ensure_ascii=False),success_yn="N",p_type="ajax", p_comment="즉시 시작 - 회의 시작", p_error=t_call['error'])
+
+        else: # 미팅룸 생성 실패
+
+            context['result'] = "cisco_error"
+            context['cisco_error'] = t_cospace['error']
+            TMUtility.tm_event_log(request,p_uri="/meetingroom/prompt",p_data=json.dumps(param_dict,ensure_ascii=False),success_yn="N",p_type="ajax", p_comment="즉시 시작 - 회의실 생성", p_error=t_cospace['error'])
+            
+    except BaseException as e:
+
+        trace_back = traceback.format_exc()
+        message = str(e)+ " " + str(trace_back)
+        logger.error("@@@ meetingroom_prompt @@@")
+        logger.error(message)
+
+        context['result'] = "server_err"
+        context['tm_error'] = str(type(e).__name__)
+        context['tm_error_detail'] = message
+        TMUtility.tm_event_log(request,p_uri="/meetingroom/prompt",p_data=json.dumps(param_dict,ensure_ascii=False),success_yn="N",p_type="ajax", p_comment="즉시 시작 - 회의실 생성(게스트)", p_error=context['tm_error'])
+
+    finally:
+        return JsonResponse(context)
+
+async def prompt_invite_step1(loop, ca, call_guid, invite_list):
+
+    futures = [asyncio.ensure_future(prompt_invite_step2(loop, ca, call_guid, invite_data)) for invite_data in invite_list]
+    result = await asyncio.gather(*futures)
+    return result
+
+async def prompt_invite_step2(loop, ca, call_guid, invite_data):
+
+    retData = await loop.run_in_executor(None, prompt_invite_fn, ca, call_guid, invite_data)
+    return retData
+
+def prompt_invite_fn(ca, call_guid, invite_data):
+
+    ret_dict = dict()
+
+    try:
+        
+        invite_data['confirmation'] = 'false'
+
+        if coreJson()['settings']['invite_confirm'] == "true":
+            invite_data['confirmation'] = 'true'
+
+        if "bandwidth" in invite_data:
+            if ""==invite_data['bandwidth'] or type(int()) != type(invite_data['bandwidth']):
+                del invite_data['bandwidth']
+
+        del invite_data['ep_group_name']
+        del invite_data['t_seq']
+        del invite_data['devicetype']
+
+        r = ca.comCallAPI('calls/{id}/callLegs'.format(id=call_guid), 'POST', jsonParam=invite_data)
+
+        ret_dict['result'] = "success"
+        ret_dict['invitee'] = invite_data
+
+    except BaseException as e:
+
+        trace_back = traceback.format_exc()
+        message = str(e)+ " " + str(trace_back)
+        logger.error("@@@ prompt_invite_fn @@@")
+        logger.error(message)
+
+        ret_dict['result'] = "fail"
+        ret_dict['invitee'] = invite_data
+
+    return ret_dict
+
+def meetingroom_webrtc(request):
+
+    context = dict()
+    user_list = list()           # context 리턴 Cospace List
+    error_list = list()             # context 리턴 Error List
+    total_list = list()             # MAX 값 구하는 용도
+    ret_list = list()
+    total = 0
+
+    #all_stack_frames = inspect.stack()
+    #caller_stack_frame = all_stack_frames[1]
+    #caller_name = caller_stack_frame[3]
+    #print("meetingroom_webrtc caller method name is", caller_name)
+
+    try:
+        draw = request.POST.get('draw')
+        start = request.POST.get('start')
+        searchText = request.POST.get('search[value]')
+        group_seq = int(request.POST.get('group_seq'))
+        server_seq = int(request.POST.get('server_seq'))
+
+        if 'searchText' in request.POST:
+            searchText = request.POST.get('searchText')
+
+        query_param = dict()
+        query_param['limit'] = 5
+        query_param['offset'] = start
+
+        if searchText != '' and searchText is not None :
+            query_param['filter'] = searchText
+
+        api_list = coreJson()['api']
+        ca = CiscoApi()
+        ca.setGroupSeqData(api_list[group_seq])
+        ca.setServerSeqData(api_list[group_seq]['api_list'][server_seq]['seq'])
+        #print("스탑!!!!!!")
+        
+        t_user_list = ca.comCallAPI('users','GET',query_param=query_param)
+
+        if t_user_list['status'] == 200 :
+            if t_user_list['total'] > 0 :
+                total = t_user_list['total']
+                temp_user_list = t_user_list['body']['users']['user']
+                
+                loop = asyncio.new_event_loop()
+                temp_list = loop.run_until_complete(searchUser_sub_1(loop,temp_user_list,ca))
+                loop.close()
+
+                context['user_list'] = temp_list
+        
+        else:
+            error_dict= dict()
+            error_dict['group_seq'] = api_list[group_seq]['group_seq']
+            error_dict['server_seq'] = api_list[group_seq]['api_list'][server_seq]['seq']
+            error_dict['error'] = t_user_list['error']
+            error_list.append(error_dict)
+
+        context['draw'] = draw
+        context['recordsTotal'] = total
+        context['recordsFiltered'] = total
+
+    except BaseException as e:
+
+        context['draw'] = 0
+        context['recordsTotal'] = 0
+        context['recordsFiltered'] = 0
+        context['user_list'] = list()
+
+        trace_back = traceback.format_exc()
+        message = str(e)+ " " + str(trace_back)
+        logger.error("@@@ meetingroom_webrtc @@@")
+        logger.error(message)
+    
+    finally:
+        return JsonResponse(context)
+
+async def searchUser_sub_1(loop,temp_user_list,ca):
+    futures = [asyncio.ensure_future(searchUser_sub_1_fetch(loop,temp_user,ca)) for temp_user in temp_user_list]
+    result = await asyncio.gather(*futures)
+    return result
+
+async def searchUser_sub_1_fetch(loop,temp_user,ca):
+    retData = await loop.run_in_executor(None , searchUser_sub_1_call_api , temp_user, ca)
+    return retData
+
+def searchUser_sub_1_call_api(temp_user,ca):
+
+    reData = dict()
+
+    try:
+        temp_result = ca.comCallAPI('users/{id}'.format(id=temp_user['@id']), "GET")
+       
+        if temp_result['status'] == 200 :
+            reData['id'] = temp_result['body']['user']['@id']
+            reData['userJid'] = temp_result['body']['user']['userJid']
+            reData['name'] = temp_result['body']['user']['name']
+            reData['email'] = temp_result['body']['user']['email']
+            reData['tenant'] = temp_result['body']['user']['tenant'] if 'tenant' in temp_result['body']['user'] else ''
+    
+        else:
+            reData['id'] = ''
+            reData['userJid'] = ''
+            reData['name'] = ''
+            reData['email'] = ''
+            reData['tenant'] = ''
+            
+    except BaseException as e:
+
+        trace_back = traceback.format_exc()
+        message = str(e)+ " " + str(trace_back)
+        logger.error("@@@ searchUser_sub_1_call_api @@@")
+        logger.error(message)
+
+        reData['id'] = ''
+        reData['userJid'] = ''
+        reData['name'] = ''
+        reData['email'] = ''
+        reData['tenant'] = ''
+
+    finally:
+        return reData
+
+# Author  : syh
+# Desc    : API 동기화
+# History
+# 2019.06.17 최초작성
+def meetingroom_match_db_api(request):
+    try:
+        context = dict()
+        user_id = request.session['user_id']
+        api_list = coreJson()['api']
+        ca = CiscoApi()
+
+        for group_list in api_list:
+            temp_dict = dict()
+            ca.setGroupSeqData(group_list)
+
+            for group_data in group_list['api_list']:
+                ca.setServerSeqData(group_data['seq'])
+                count=ca.comCallAPI('cospaces','GET')
+                num=int((count['total']-1) / 10) * 10
+                loop =  asyncio.new_event_loop()
+                loop_result=loop.run_until_complete(fast_check_num(loop,num,user_id,ca))
+                loop.close()
+
+    except BaseException as e:
+
+        trace_back = traceback.format_exc()
+        message = str(e)+ " " + str(trace_back)
+        logger.error("@@@ meetingroom_match_db_api @@@")
+        logger.error(message)
+
+    finally:
+        context["result"]="success"
+        return JsonResponse(context)  
+
+async def fast_check_num(loop,num,user_id,ca):
+    futures = [asyncio.ensure_future(meetingroom_list_sub_fetch_check_num(loop,user_id,ca,i)) for i in range (0,num+1,10)]
+    result= await asyncio.gather(*futures)
+
+async def meetingroom_list_sub_fetch_check_num(loop,user_id,ca,i):
+    query_param = dict()
+    query_param['limit'] =10
+    query_param['offset']=i
+    ret_data = await loop.run_in_executor(None,match_db_api_num_check,user_id,ca,query_param)
+
+
+def match_db_api_num_check(user_id,ca,query_param):
+    try:
+        t_cospace_list = ca.comCallAPI('cospaces', 'GET', query_param=query_param)
+        loop =asyncio.new_event_loop()
+        loop_result=loop.run_until_complete(faster_more(loop,user_id,ca,t_cospace_list))
+        loop.close()
+    except BaseException as e:
+
+        trace_back = traceback.format_exc()
+        message = str(e)+ " " + str(trace_back)
+        logger.error("@@@ meetingroom_match_db_api > match_db_api_num_check @@@")
+        logger.error(message)
+
+    finally:
+        return loop_result
+
+
+
+async def faster_more(loop,user_id,ca,t_cospace_list):
+    data = t_cospace_list["body"]["coSpaces"]["coSpace"]
+    futures = [asyncio.ensure_future(meetingroom_list_sub_fetch(loop,id,user_id,ca,t_cospace_list)) for id in data]
+    result= await asyncio.gather(*futures)
+
+
+async def meetingroom_list_sub_fetch(loop,id,user_id,ca,t_cospace_list):
+    ret_data = await loop.run_in_executor(None, match_db_api,id,user_id,ca,t_cospace_list)
+
+def match_db_api(id,user_id,ca,t_cospace_list):
+    try:
+        temp_data = ca.comCallAPI('cospaces/{cospace_id}'.format(cospace_id = id["@id"]), 'GET')
+        real_data=temp_data['body']['coSpace']
+     
+        if 'name' not in real_data:
+            real_data['name'] = ''
+
+        if 'uri' not in real_data:
+            real_data['uri'] = ''
+
+        if 'callId' not in real_data:
+            real_data['callId'] = ''
+
+        if 'passcode' not in real_data:
+            real_data['passcode'] = ''
+
+        if 'callLegProfile' not in real_data:
+            real_data['callLegProfile']=''
+        
+        if 'callProfile' not in real_data:
+            real_data['callProfile']=''
+
+        query='''
+            select count(1) as num 
+            from cms_cospace 
+            where cospace_id = '{cospace_id}'
+        '''.format(cospace_id = id["@id"])
+
+        count=TMUtility.get_query_to_dict(query)
+        if count['num'] > 0 :
+            # mysql single quote escape
+            real_data['uri'] = real_data['uri'].replace("'", "''")
+            query='''
+                update cms_cospace 
+                set name = '{name}',
+                    uri = '{uri}',
+                    call_id = '{call_id}',
+                    passcode = '{passcode}',
+                    template_seq = (
+                        select seq 
+                        from cms_template 
+                        where callprofile = '{callProfile}' 
+                        and calllegprofile = '{callLegProfile}'
+                    ),
+                    group_seq = '{group_seq}',
+                    server_seq = '{server_seq}',
+                    modify_id = '{modify_id}' 
+                where cospace_id = '{cospace_id}'
+            '''.format(
+                name=real_data['name'],
+                uri=real_data['uri'],
+                call_id=real_data['callId'],
+                passcode=real_data['passcode'],
+                group_seq=t_cospace_list['group_seq'],
+                server_seq=t_cospace_list['server_seq'],
+                modify_id=user_id,
+                cospace_id=real_data['@id'],
+                callProfile=real_data['callProfile'],
+                callLegProfile=real_data['callLegProfile']
+            )
+            TMUtility.execute_query(query)
+        else:
+            template_seq = ''
+            try:
+                ct = CmsTemplate.objects.get(callprofile=real_data['callProfile'],calllegprofile=real_data['callLegProfile'])
+                template_seq = ct.seq
+            except BaseException as err:
+                pass
+
+            real_data['uri'] = real_data['uri'].replace("'", "''")
+            query='''
+                insert into cms_cospace(
+                    cospace_id,
+                    name,
+                    uri,
+                    call_id,
+                    passcode,
+                    template_seq,
+                    group_seq,
+                    server_seq,
+                    regist_id
+                ) values 
+                (
+                    '{cospace_id}',
+                    '{name}',
+                    '{uri}',
+                    '{call_id}',
+                    '{passcode}',
+                    '{template_seq}',
+                    '{group_seq}',
+                    '{server_seq}',
+                    '{regist_id}'
+                )
+            '''.format(
+                cospace_id=real_data['@id'],
+                name=real_data['name'],
+                uri=real_data['uri'],
+                call_id=real_data['callId'],
+                passcode=real_data['passcode'],
+                group_seq=t_cospace_list['group_seq'],
+                server_seq=t_cospace_list['server_seq'],
+                regist_id=user_id,
+                template_seq=template_seq
+                )                          
+            TMUtility.execute_query(query)
+
+    except BaseException as e:
+
+        trace_back = traceback.format_exc()
+        message = str(e)+ " " + str(trace_back)
+        logger.error("@@@ match_db_api Error @@@")
+        logger.error(message)
+
+    finally:
+        return 'success'    
+
+
+# db to api
+def reverse_match_db_api(request):
+    context = dict()
+    ca = CiscoApi()
+    query = '''
+        select cospace_seq,name,uri,call_id,passcode,group_seq,server_seq from cms_cospace where delete_yn = 'N'
+    '''
+    data_list = TMUtility.get_query_to_list(query)
+    for data in data_list:
+        jsonParam = dict()
+        jsonParam['name'] = data['name']
+        jsonParam['uri'] = data['uri']
+        jsonParam['callId'] = data['call_id']
+        jsonParam['passcode'] = data['passcode']
+        ca.setGroupSeq(data['group_seq'])
+        ca.setServerSeqData(data['server_seq'])
+        t_cospace = ca.comCallAPI('cospaces','POST',jsonParam=jsonParam)
+        if 200==t_cospace['status']:
+            cospace_guid = t_cospace['headers']['Location'].split('/')[-1]
+            query = '''
+                update cms_cospace set cospace_id = '{cospace_guid}' where cospace_seq = '{cospace_seq}'
+            '''.format(cospace_guid = cospace_guid, cospace_seq = data['cospace_seq'])
+            TMUtility.execute_query(query)
+    return JsonResponse(context)

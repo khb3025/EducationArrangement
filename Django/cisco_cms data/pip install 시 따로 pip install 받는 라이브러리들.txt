@@ -1,0 +1,5 @@
+asgiref==2.3.2
+channels==2.2.0
+channels-redis==2.3.3
+daphne==2.3.0
+xows==1.0.3

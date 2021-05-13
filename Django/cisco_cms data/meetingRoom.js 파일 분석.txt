@@ -1,0 +1,567 @@
+var table_mr, table_ep, table_web, table_merge;
+
+(※ 데이터테이블 관련 설명은 이전 파일에 설명해두었음으로 생략하낟.)
+
+$(document).ready(function () {
+
+  _page = new page();
+  _page.init();
+
+  function page(){
+
+    // 초기화
+    this.init = function(){
+      _page.initList(); =======> DataTable의 초기화
+      _page.initSelectBoxGroup(); ======> 
+      _page.initEvent();
+      table_ep = $(".table_ep").createEpTable();
+      table_web = $(".table_web").createWebrtcTable();
+      table_merge = $(".table_merge").createMergeTable();
+    }
+
+    // 초기 이벤트
+    this.initEvent = function(){
+
+      $("#btn_save").on("click", function () {
+        _page.mr_save();
+      });
+    
+      $("#btn_start").on("click", function () {
+        _page.mr_start();
+      });
+    
+      $("#btn_clear").on("click", function () {
+        _page.dataClear();
+      });
+    
+      $("#advanceOption").on("click",function(){
+        if($(this).prop("checked")){
+          $("#advancedDiv").removeClass("deactive");
+        }else{
+          $("#advancedDiv").addClass("deactive");
+        }
+      });
+    
+      $("#advancedBtn").on("click", function () {
+        $(this).children().hasClass("active") ? $(this).children().removeClass("active") : $(this).children().addClass("active");
+        $("#advanced").hasClass("deactive") ? $("#advanced").removeClass("deactive") : $("#advanced").addClass("deactive");
+      });
+    
+      $(".tm-group").on("change", function () {
+        var selVal = $(this).find("option:selected").val();
+        _page.initSelectBoxServer(selVal,0);
+        _page.initSelectBoxTemplate
+        (selVal);
+        table_web.column().checkboxes.deselectAll();
+        table_web.rows().remove().draw();
+      });
+    
+      $("#btn_back").on("click", function () {
+        _page.dataClear();
+        $("#listDiv").showDiv();
+      });
+    
+      $(".tm-btn-close").on("click", function () {
+        _page.dataClear();
+        $("#listDiv").showDiv();
+      });
+    
+      $("#btn_prompt_start").on("click", function () {
+        _page.promptStart();
+      });
+    
+      $("#btn_invite_list").on("click", function () {
+        $("#btn_invite_list").addClass("deactive");
+        $("#btn_device_list").removeClass("deactive");
+        $("#invite_div").addClass("deactive");
+        $("#invite_list_div").removeClass("deactive");
+        table_merge.columns.adjust();
+      });
+    
+      $("#btn_device_list").on("click", function () {
+        $("#btn_invite_list").removeClass("deactive");
+        $("#btn_device_list").addClass("deactive");
+        $("#invite_div").removeClass("deactive");
+        $("#invite_list_div").addClass("deactive");
+      });
+
+      $("#mr_callId").on("keyup",function(){
+        $("#mr_uri").val($(this).val());
+      });
+
+      $("#prompt_callid").on("keyup",function(){
+        $("#prompt_uri").val($(this).val());
+      });
+
+    }
+
+    /* -------------------------------- 일반 -------------------------------- */
+    // (일반) 미팅룸 목록 로드
+    this.initList = function() {
+      table_mr = $("#table_mr").DataTable({
+        dom: '<"row"<"col-sm-6"f>""<"col-sm-6 tm-btn-group text-right">">t<"row"<"col-sm-12"p>>',
+        searching: true,
+        paginate: true,
+        //paging: true, paginate와 동일ㄴ
+        pageLength: 15,
+        processing: true,
+        serverSide: true,
+        ordering: false,
+        ajax: {
+          url: "/meetingroom/list", //데이터를 가져올 url
+          type: "POST",
+          dataType: "json",
+          data: {
+            'csrfmiddlewaretoken': $('.hidden_csrftoken').val(),
+          },
+          dataFilter: function (data) {
+            //var api_list = _api_json['api'][0]['api_list'];
+            //console.log("api_list --->" , api_list);
+            var json = jQuery.parseJSON(data);
+            //json['success'] = [{value1 : 'val1'}, {value2 : 'val2'}]
+            //json['data'][0]['name'] = '둠칫둠칫!!!';
+            console.log("return JSON DATA!!! ->",json);
+            return JSON.stringify(json);
+          }
+        },
+        createdRow:function(row, data, idx){
+          
+        },
+        columns: [
+          {data: "@id",fnCreatedCell:function(nTd, sData, oData, iRow, iCol){
+              $(nTd).html($.dtcheckboxbs4());
+              
+              console.log('sData -->', sData);
+              console.log('oData -->', oData);
+              console.log('iRow -->', iRow);
+              console.log('iCol -->', iCol);
+          }},
+          {data: "name"},
+          {data: "uri"},
+          {data: "callId"},
+          {data: "owner_yn"},
+          {data: "group_name"},
+          {data: "group_seq"},
+          {
+            
+            'defaultContent': '', //'<h1>default</h1>', 
+            
+            fnCreatedCell: function (nTd, sData, oData, iRow, iCol) {
+              if(oData['owner_yn'] == 'Y'){
+                var $button = $("<button>").addClass("btn btn-sm p-t-0 p-b-0")
+                  .on("click", function () {
+                    _page.mr_detail(oData['@id'], oData['group_seq'], oData['server_seq'])
+                  })
+                  .text("VIEW");
+                
+                  $(nTd).html($button);
+              }
+              else{
+                $(nTd).html('');
+              }
+            }
+            
+            
+          },
+          //{success : 'value1'},
+          //{success : 'value2'}
+          
+
+        ],
+        columnDefs: [
+          {targets: 0, orderable: false, searchable: false, checkboxes: true, className: "text-center text-middle"},
+          {targets: [4, 6], visible: false},
+          {targets: [1, 2, 3, 4, 5, 6, 7],searchable: false, className: "text-center text-middle"}
+        ],
+        initComplete:function(){
+
+          let btn_del = $("<button>").attr("id","btn_del")
+                                    .addClass("btn btn-outline b-danger text-danger text-up")
+                                    .text(gettext("버튼.공통.삭제"))
+                                    .on("click",function(){
+                                      _page.mr_delete();
+                                    });
+
+          let btn_match = $("<button>").attr("id","btn_match")
+                                    .addClass("btn btn-outline b-success text-success m-r-2 text-up")
+                                    .text(gettext("버튼.미팅룸.동기화"))
+                                    .on("click",function(){
+                                      _page.mr_match();
+                                    });
+
+          let btn_add = $("<button>").attr("id","btn_add")
+                                    .addClass("btn btn-outline b-primary text-primary m-r-2 text-up")
+                                    .text(gettext("버튼.공통.추가"))
+                                    .on("click",function(){
+                                      _page.initSelectBoxGroup()
+                                      _page.dataClear();
+                                      $("#inputDiv").showInput();
+                                      $("#btn_start").addClass("deactive");
+                                    });
+
+          let btn_prompt = $("<button>").attr("id","btn_prompt")
+                                        .addClass("btn btn-outline b-warn text-warn m-r-2 text-up")
+                                        .text(gettext("버튼.미팅룸.즉시시작"))
+                                        .on("click",function(){
+                                          _page.initSelectBoxGroup()
+                                          $("#promptDiv").showDiv();
+                                        });
+
+          $(".tm-btn-group").append(btn_match).append(btn_prompt).append(btn_add).append(btn_del);
+
+        }
+      }).columns.adjust();
+
+      $('#table_mr_filter.dataTables_filter input[type=search]').unbind().bind('keyup', function (e) {
+        if (e.keyCode == 13) {
+          table_mr.search(this.value).draw();
+        }
+      });
+
+      $(".table_mr > thead > tr > th > input[type='checkbox']").parent().html($.dtcheckboxbs4head());
+
+    }
+
+    // (일반) 미팅 상세보기
+    this.mr_detail = function(id) {
+      _page.dataClear();
+      
+      var param = {};
+      param['id'] = id;
+      console.log("상세 param  ------->>>>>>>", param);
+      
+      $.kotech.ajax({
+        url: '/meetingroom/detail',
+        data: param,
+        callback: function (data) {
+
+          $("#btn_start").removeClass("deactive");
+          $("#inputDiv").showInput();
+
+          var ret = data.data;
+          $("#inputDiv").bindJsonToElement(ret);
+
+        }
+      });
+    }
+
+    // (일반) 미팅 저장
+    this.mr_save = function() {
+
+      if (!$("#inputDiv").dataValidations()){
+        return false;
+      }
+
+      var pUrl = "/meetingroom/create";
+      var param = $("#inputDiv").getElementByJson();
+      console.log("param!!! -----> ", param);
+      
+      if (param['@id'] != "") {
+        pUrl = "/meetingroom/update";
+
+      }
+      console.log("저장 및 업데이트전 param!!! ==> " , param);
+      $.kotech.ajax({
+        url: pUrl,
+        data: param,
+        callback: function (data) {
+
+          $.kotech.alert({
+            type: "success",
+            text: "common.alert.success",
+            callback: function () {
+              $("#listDiv").showDiv();
+              table_mr.ajax.reload();
+            }
+          });
+
+        }
+      });
+
+    }
+
+    // (일반) 미팅 시작
+    this.mr_start = function() {
+      var param = $("#inputDiv").getElementByJson();
+      $.kotech.ajax({
+        url: "/meetingroom/start",
+        data: param,
+        callback: function (data) {
+
+          $.kotech.alert({
+            type:"success",
+            text:"common.alert.success",
+            callback:function(){
+              _page.move_activecall(data['call_id'], data['group_seq'], data['server_seq'], data['cospace_id']);
+            }
+          });
+          
+        }
+      });
+
+    }
+
+    // (일반) 미팅룸 삭제
+    this.mr_delete = function() {
+      $.kotech.alert({  ========================> 경고창이 뜨는 js kotech라이브러리
+        text: "common.alert.warning.delmassage.title",
+        type: "question",
+        callback: function (isOK) {
+          if (isOK['value']) {
+            _page.mr_delete_ajax();
+          }
+        }
+      });
+    }
+
+    // (일반) 미팅룸 삭제 Ajax
+    this.mr_delete_ajax = function() {
+      var chk_list = [];
+      var sel_list = [];
+      var param_list = [];
+      var param = {};
+      var ep_list = table_mr.column(0).checkboxes.selected();
+
+      $.each(ep_list, function (key, value) {    ============> dataTable에서 체크된 체크박스 체크의 value값을 리스트로 push하는 로직
+        console.log("key ---> " + key + " value ---> " + value);
+        chk_list.push(value);   
+        	
+      });
+
+      var table_data = table_mr.rows().column(0).data();
+      console.log("chk_list===>>>>>>", chk_list);
+	/* chk_list
+	["b5edf481-ace5-4f91-a4b3-8352f77780d6", "4ed8a125-b36a-4911-88f8-4c4dcf36396b", "95520d30-799e-4015-9ff5-0baf45157cd2"]
+	*/
+      console.log("table_data ===>>>>>" , table_data);
+	      	
+
+
+      for (var j = 0; j < chk_list.length; j++) {
+        for (var i = 0; i < table_data.length; i++) {
+          if (table_data[i] == chk_list[j]) {
+            sel_list.push(i);
+            break;
+          }
+        }
+      }
+	/*
+	 sel_list = [9, 10, 11]
+	*/
+      for (var i = 0; i < sel_list.length; i++) {
+        param_list.push(table_mr.row(sel_list[i]).data()); 
+      }
+	/*
+	param_list = [{@id: "b5edf481-ace5-4f91-a4b3-8352f77780d6", name: "미팅룸 삭제 분석1", autoGenerated: "false", uri: "1111111", callId: "1111111", …},
+		     {@id: "4ed8a125-b36a-4911-88f8-4c4dcf36396b", name: "미팅룸 삭제 분석2", autoGenerated: "false", uri: "2222222", callId: "2222222", …}, 
+		     {@id: "95520d30-799e-4015-9ff5-0baf45157cd2", name: "미팅룸 삭제 분석3", autoGenerated: "false", uri: "3333333", callId: "3333333", …}]
+	*/
+      var temp = {};
+      temp['data'] = param_list;
+	/*
+	temp['data'] =  { data : [{@id: "b5edf481-ace5-4f91-a4b3-8352f77780d6", name: "미팅룸 삭제 분석1", autoGenerated: "false", uri: "1111111", callId: "1111111", …},
+		          {@id: "4ed8a125-b36a-4911-88f8-4c4dcf36396b", name: "미팅룸 삭제 분석2", autoGenerated: "false", uri: "2222222", callId: "2222222", …}, 
+		          {@id: "95520d30-799e-4015-9ff5-0baf45157cd2", name: "미팅룸 삭제 분석3", autoGenerated: "false", uri: "3333333", callId: "3333333", …}]
+
+
+	*/		
+
+
+      param['data'] = JSON.stringify(temp); ====> { data : JSON.stringify(temp['data']) } ※ ajax로 요청시 JSON 객체를 던질순 없고 객체를 JSON 형태의 문자열로 변경해주어야한다.
+		
+      $.kotech.ajax({ 
+        url: "/meetingroom/delete", 
+        data: param,
+        callback: function (data) {
+          $.kotech.alert({
+            type: "success",
+            text: "common.alert.success",
+            callback: function () {
+              $("#listDiv").showDiv(); =====> kotech.js 파일에 존재 메소드가 존재하며, 선택한 요소만 display 활성화 나머지 요소들은 deactive 시키는 함수 {추가나 상세 버튼으로 클릭하여 상세 정보 div 가 display 되었을 때, datatable reload 시 상세정보 div를 비활성화 시킨다.}
+              table_mr.ajax.reload(); =====> dataTable 의 ajax 요청 reload.
+            }
+          });
+
+        }
+      });
+
+    }
+
+    // 동기화
+    this.mr_match=function(){
+  
+      $.kotech.ajax({
+        url: "/meetingroom/match_db_api",
+        data: {},
+        callback: function (data) {
+          
+          if(data.result="success"){
+            
+            $.kotech.alert({
+              type: "success",
+              text: "common.alert.success",
+              callback: function () {
+                table_mr.ajax.reload();
+              }
+            });
+
+          }
+          else{
+            $.kotech.alert({
+              type: "error",
+              text: "common.alert.failed"})
+          }
+
+        }
+      });
+    }
+
+
+    /* -------------------------------- PROMPT -------------------------------- */
+
+    // (PROMPT) 회의 시작 이벤트
+    this.promptStart = function() {
+
+      if (!$("#promptDiv").dataValidation()) {
+        return false;
+      }
+
+      var pUrl = "/meetingroom/prompt";
+      var temp = $("#promptDiv").getElementByJson();
+      var param = temp;
+
+      var inviteList = $.kotech.getMergeTableData();
+      param['data'] = JSON.stringify(inviteList);
+
+      $.kotech.ajax({
+        url: pUrl,
+        data: param,
+        callback: function (data) {
+
+          $.kotech.alert({
+            type:"success",
+            text:"common.alert.success",
+            callback:function(){
+              _page.move_activecall(data['call_id'], data['group_seq'], data['server_seq'], data['cospace_id']);
+            }
+          });
+          
+        }
+      });
+
+    }
+
+    /* -------------------------------- 공통 -------------------------------- */
+    // (공통) 데이터 초기화
+    this.dataClear = function() {
+      $("#promptDiv").dataClear();
+      $("#inputDiv").dataClear();
+      $("#mr_passcode_confirm").val('');
+      $("#mr_guest_passcode_confirm").val('');
+      $("#btn_device_list").addClass("deactive");
+      $("#btn_invite_list").removeClass("deactive");
+      $("#invite_div").removeClass("deactive");
+      $("#invite_list_div").addClass("deactive");
+      $.kotech.dataTable.clearInviteTable();
+    }
+
+    // (공통) 템플릿 초기화
+    this.initSelectBoxTemplate = function(group_seq) {
+      var param = {};
+      param['group_seq'] = group_seq;
+
+      $.kotech.ajax({
+        url: '/meetingroom/init',
+        data: param,
+        callback: function (data) {
+
+          var _tag = $("<option>").val("").text("None");
+          $(".tm-template").empty().append(_tag); ========> class ='tm-template'를 사용하는 태그의 id는 mr_template_select / prompt_template_select 있다.  그러나 meetingRoom List 페이지에서는 deactive (css Class)에 의해 숨겨져있다.
+
+          var retList = data.data;
+          /*
+	retList = [{'seq': 55, 'title': 'Kotech_Template'}, {'seq': 97, 'title': 'testtemplate'}, {'seq': 98, 'title': 'layout_template'}, {'seq': 100, 'title': '12341234'}]
+	*/
+	
+	
+          for (var i = 0; i < retList.length; i++) {  ========> id 값이 mr_template_select 과 prompt_template_select  인 select 태그들은 포함하고 옵션이 동일하다.
+            var ele = retList[i]; 
+            var tag = $("<option>").val(ele['seq']).text(ele['title']);
+            $(".tm-template").append(tag);
+          }
+        }
+      });
+    }
+
+    // (공통) 서버 SelectBox 초기화
+    this.initSelectBoxServer = function(group_seq,server_seq) {
+      var api = _api_json['api'];    =================================> 다음의 정보를 포함한다.
+      /*			    
+      {"api": [
+		{
+		"api_list": [
+			  {"ipAddress": "14.63.53.22", "max_callLeg_total": "500", "password": "Etechsystem", "port": "449", "seq": "0", "serverName": "api_server_1", "useHttps": "True", "userName": "admin"}, 
+			  {"ipAddress": "14.63.53.22", "max_callLeg_total": "500", "password": "Etechsystem", "port": "449", "seq": "1", "serverName": "api_server_2", "useHttps": "True", "userName": "admin"}
+			], 
+		"group_name": "cluster1", "group_seq": "0"
+		}
+	   ], =====> api에 해당하는 대괄호의 내용이 var api 값이다. 
+       "callcommand": {"presentationContributionAllowed": "false", "presentationViewingAllowed": "true", "rxAudioMute": "true", "rxVideoMute": "true", "txAudioMute": "true", "txVideoMute": "true", "videoMode": "false"}, 
+       "settings": {"callLicense": "5", "cms_version": "240", "default_bandwidth": "384000", "default_lang": "ko", "filter": "cb", "invite_confirm": "false", "main_list_timer": "10000", "overrideParticipantName": "true", "recording": "true"}
+      }
+     */
+
+      var group = api[parseInt(group_seq)]; ====> api[0] == json객체를 group 변수에 저장한다. {group_seq는 DataTable로 부터 전달 받았다.}
+      $(".tm-server").empty();    ==============================================> meetingRoom.html에서 추가버튼 클릭시에 보여지는 (미팅룽 정보{div})에 포함된 서버 이름과 셀렉트 박스의 element를 비운다.
+
+      for (var i = 0; i < group['api_list'].length; i++) {
+        var ele = group['api_list'][i];   
+        var tag = $("<option>").val(ele['seq']).text(ele['serverName']); ========> select태그의 옵션태그(element)를 셋팅한다[api_server_1 , api_server_2]
+        if(ele['seq'] == server_seq){	=========> dataTable에서 전달받은 server_seq와 base로부터 전달받은 JSON 'api_list' 데이터의 'seq' 값이 동일하다면 
+          $(tag).prop("selected",true);  =========> 해당 옵션 element를 '선택됨'으로 초기화한다.
+        }
+        $(".tm-server").append(tag);    ==========> 옵션을 서버 이름 아래에 존재하는 select 태그의 옵션[element]으로 추가한다.
+      }
+    }
+
+    // (공통) Group SelectBox 초기화
+    this.initSelectBoxGroup = function() {
+      //var sss = ddsad['111'];
+      //console.log("sss->", sss);
+      var api = _api_json['api'];  
+
+      $(".tm-group").empty();  ===============> 추가버튼 클릭 시 보여지는 상세 div의 그룹 이름 select 박스를 초기화
+
+      for (var i = 0; i < api.length; i++) {
+        var ele = api[i];
+        var tag = $("<option>").val(ele['group_seq']).text(ele['group_name']);  
+        $(".tm-group").append(tag);
+      }
+
+      _page.initSelectBoxServer(0,0);  ===> 서버 SelectBox 초기화
+      _page.initSelectBoxTemplate(0); ====> meetingRoom.html에 숨겨져있는 deactive Select 박스의 초기화
+    }
+
+    // (공통) ActiveCall 로 이동 및 form 데이터 전송
+    this.move_activecall = function(temp_call_id, temp_gseq, temp_sseq, temp_cospace_id){
+
+      var obj = {};
+      var tempData = {};
+      tempData['call_id'] = temp_call_id;
+      tempData['group_seq'] = temp_gseq;
+      tempData['server_seq'] = temp_sseq;
+      tempData['cospace_id'] = temp_cospace_id;
+      tempData['csrfmiddlewaretoken'] = $('.hidden_csrftoken').val();
+
+      obj['method'] = "post";
+      obj['action'] = "/activecall_monitor";
+      obj['target'] = "_self";
+      obj['data'] = tempData;
+
+      $.kotech.sendFormData(obj);
+
+    }
+
+  } // page
+
+}); // document 
