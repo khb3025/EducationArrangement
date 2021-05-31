@@ -1,0 +1,25 @@
+
+Operation failed with exitcode 2
+09:09:59 Dumping kicebook (ts_days_quiz)
+Running: mysqldump.exe --defaults-file="C:\Users\khb30\AppData\Local\Temp\tmp0gkgpilr.cnf"  --host=182.237.86.231 --port=3306 --default-character-set=utf8 --user=kicebook --protocol=tcp --skip-triggers "kicebook" "ts_days_quiz"
+mysqldump: Couldn't execute 'SELECT COLUMN_NAME,                       JSON_EXTRACT(HISTOGRAM, '$."number-of-buckets-specified"')                
+		 	   FROM information_schema.COLUMN_STATISTICS                
+			   WHERE SCHEMA_NAME = 'kicebook' AND TABLE_NAME = 'ts_days_quiz';': 
+
+Unknown table 'column_statistics' in information_schema (1109)
+
+
+-- export 에러시 column_statistics 에러 해결 방법
+cmd 창  >> mysqldump --column-statistics=0 -ukicebook -pkotech12#$ -h182.237.86.231 kicebook > kice_book_dump.sql
+
+
+-- import 방법
+[첫번째]
+mysql workbench  --> 1. 복사할 계정으로 로그인 
+		      2. 계정 내 kice관련 스키마가 존재하지 않음 -> kice_book_dump.sql 내의 스키마와 동일한 스키마 생성(Create Database kicebook;)
+		      3. Administration 탭 -> Data Import/Restore 클릭 -> 덤프파일이 존재하는 폴더 선택 -> 스키마 선택  -> start Import 클릭
+[두번쨰]
+cmd 창 >> mysql -uroot -proot kicebook < C:\kicebook_db\kice_book_dump.sql   [root 계정에 kicebook 스키마를 생성{Create Database kicebook} 후 해당 명령어를 친다.]
+
+
+
